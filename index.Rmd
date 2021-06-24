@@ -1,0 +1,24 @@
+---
+title: "策略运营组"
+output: 
+  flexdashboard::flex_dashboard:
+    vertical_layout: scroll
+    orientation: rows
+    theme: spacelab
+
+params:
+  cur_date: "`r Sys.Date()`"
+  cur_term_id: 1704
+  n_month_overall: 6
+  n_month: 3
+  cur_x: 9
+---
+
+```{r setup, include=FALSE}
+knitr::read_chunk('setup.R')
+```
+
+```{r setup, echo=FALSE, cache=FALSE}
+```
+
+
