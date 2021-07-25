@@ -406,22 +406,6 @@ showDT(by_term_name)
 ### 班型
 
 ```{r}
-dat_class <- dat %>% 
-    filter(
-      classopen_date >= "2021-06-18"
-    ) %>% 
-    mutate(
-      term_name = ifelse(term_id == 1888, "2021暑假-第1期-早鸟",
-                   as.character(term_name)),
-      group_class = ifelse(str_detect(term_remarks, "转介绍"), "转介绍",
-                       ifelse(str_detect(term_remarks, "编数"), "编数同带",
-                          ifelse(str_detect(term_tag_name, "ABCD"), 
-                               ifelse(user_level != "D" | is.na(user_level), "ABC", "D"),
-                               NA)))
-    ) 
-```
-
-```{r}
 res <- dat_class %>% 
   group_by(group_class, term_name) %>% 
   getRates() %>% 
@@ -1904,7 +1888,7 @@ showDT(by_term_city %>%
 )
 ```
 
-班型总览 {data-navmenu="班型"}
+班型总览
 =====================================
 
 ```{r}
@@ -1914,25 +1898,14 @@ grp_data  <-  dat_class %>%
      ) %>%
   group_by(term_name, group_class)
 
-res <- getRates(grp_data) %>% 
-  left_join(
-    grp_data %>% 
-      mutate(addWx_dayn = as.Date(add_wx_time) - as.Date(user_class_start_time)) %>%
-      summarise(
-        .enroll_total = n_distinct(user_id, na.rm = TRUE),
-        add_wx_d1_rate = n_distinct(ifelse(addWx_dayn <= 0, 
-                                           user_id, NA), na.rm = TRUE)/.enroll_total,
-        add_wx_d2_rate = n_distinct(ifelse(addWx_dayn <= 1, 
-                                           user_id, NA), na.rm = TRUE)/.enroll_total,
-        add_wx_d3_rate = n_distinct(ifelse(addWx_dayn <= 2, 
-                                           user_id, NA), na.rm = TRUE)/.enroll_total,
-        .groups = "drop_last"
-      ) %>% 
-      mutate(across(ends_with("rate"), ~ round(.x *100, 0))) %>% 
-      select(-.enroll_total)
-    , by = group_vars(grp_data)
-  ) %>% 
+by_term_seg <- getRates(grp_data) %>% 
   filter(enroll_rate > 5)
+
+by_term_seg_hct <- grp_data %>% 
+  filter(!is.na(group_name)) %>% 
+  group_by(term_name, group_class, group_name) %>% 
+  filter(n() > 50) %>% 
+  getRates()
 ```
 
 Row
@@ -1941,13 +1914,20 @@ Row
 ### 各班型续报率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = apply_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = apply_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = apply_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_text(aes(label = apply_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = apply_rate), nudge_y = 0.5) + 
     facet_grid(. ~ group_class, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
 ggplotly(gg)
 ```
@@ -1958,38 +1938,20 @@ Row
 ### 各班型微信添加率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = add_wx_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = add_wx_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = add_wx_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_line(aes(y = add_wx_d1_rate, group = group_class, color = group_class),
-              color = "grey") + 
-    geom_line(aes(y = add_wx_d2_rate, group = group_class, color = group_class),
-            color = "grey") + 
-    geom_line(aes(y = add_wx_d3_rate, group = group_class, color = group_class),
-            color = "grey") + 
-    geom_text(aes(label = add_wx_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = add_wx_rate), nudge_y = 1.5, nudge_x = 0.1) + 
     facet_grid(. ~ group_class, scales = "free") +
-    theme(legend.position = "none")
-ggplotly(gg)
-```
-
-```{r}
-gg <- res %>% 
-  filter(term_name %in% c("2021暑假-第1期","2021暑假-第2期","2021暑假-第3期","2021暑假-第4期")) %>% 
-  ggplot(aes(x = group_class, y = add_wx_rate)) + 
-    geom_point(aes(color = term_name)) +
-    geom_line(aes(group = term_name, color = term_name, 
-                   text = paste0("招生量:",enroll_rate))) + 
-    geom_line(aes(y = add_wx_d1_rate, group = term_name, color = term_name),
-              color = "grey") + 
-    geom_line(aes(y = add_wx_d2_rate, group = term_name, color = term_name),
-            color = "grey") + 
-    geom_line(aes(y = add_wx_d3_rate, group = term_name, color = term_name),
-            color = "grey") + 
-    geom_text(aes(label = add_wx_rate)) + 
-    facet_grid(. ~ term_name, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
 ggplotly(gg)
 ```
@@ -2000,13 +1962,20 @@ Row
 ### 各班型首课到课率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = unit1_attend_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = unit1_attend_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = unit1_attend_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_text(aes(label = unit1_attend_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = unit1_attend_rate), nudge_y = 1.5, nudge_x = 0.1) + 
     facet_grid(. ~ group_class, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
 ggplotly(gg)
 ```
@@ -2017,40 +1986,20 @@ Row
 ### 各班型5完课率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = unit5_finish_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = unit5_finish_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_text(aes(label = unit5_finish_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = unit5_finish_rate), nudge_y = 1.5, nudge_x = 0.1) + 
     facet_grid(. ~ group_class, scales = "free") +
-    theme(legend.position = "none")
-ggplotly(gg)
-```
-
-
-```{r}
-grp_data  <-  dat_class %>% 
-  filter(
-    !is.na(group_class)
-     ) %>%
-  group_by(term_name, group_class, group_name)
-
-res <- grp_data %>% 
-  getRates() %>% 
-  filter(enroll_total > 5)
-```
-
-### 各班型5完课率
-
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
-    geom_point(aes(color = group_class, text = group_name), size = 0.8) +
-    geom_boxplot(aes(group = group_class, color = group_class, 
-                   text = paste0("招生量:",enroll_rate))) + 
-    #geom_text(aes(label = unit5_finish_rate)) + 
-    facet_grid(. ~ group_class, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
 ggplotly(gg)
 ```
@@ -2061,13 +2010,20 @@ Row
 ### 各班型留存率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = retent_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = retent_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = retent_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_text(aes(label = retent_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = retent_rate), nudge_y = 1.5, nudge_x = 0.1) + 
     facet_grid(. ~ group_class, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
 ggplotly(gg)
 ```
@@ -2078,112 +2034,21 @@ Row
 ### 各班型完课续报率
 
 ```{r}
-gg <- res %>% 
+gg <- by_term_seg %>% 
   ggplot(aes(x = term_name, y = unit5_apply_rate)) + 
-    geom_point(aes(color = group_class)) +
+    geom_boxplot(aes(x = term_name, y = unit5_apply_rate), color = "grey",
+                 data = by_term_seg_hct) +
+    geom_point(aes(x = term_name, y = unit5_apply_rate, 
+                   text = paste0(group_name, "-", ct_total, "-",enroll_total)), 
+               color = "grey", size = 0.8,
+               data = by_term_seg_hct) +
     geom_line(aes(group = group_class, color = group_class, 
                    text = paste0("招生量:",enroll_rate))) + 
-    geom_text(aes(label = unit5_apply_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_text(aes(label = unit5_apply_rate), nudge_y = 1.5, nudge_x = 0.1) + 
     facet_grid(. ~ group_class, scales = "free") +
+    labs(x = "", y = "") +
     theme(legend.position = "none")
-ggplotly(gg)
-```
-
-
-
-HCT组 {data-navmenu="班型"}
-=====================================
-
-```{r}
-res <- dat_class %>% 
-  filter(
-    !is.na(group_class),
-    term_name != "2021春季-第16期"
-     ) %>%
-  group_by(term_name, group_class, group_city, group_name) %>% 
-  getRates() %>%
-  filter(enroll_total > 10)
-```
-
-Row {data-height=500}
--------------------------------------
-
-### 各班型HCT组续报率分布 
-
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = apply_rate)) + 
-    geom_boxplot() + 
-    geom_point(aes(color = group_city, 
-                   text = paste0(group_name, "/", enroll_total)), 
-               size = 0.5, alpha = 0.8) + 
-    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
-    facet_grid(. ~ group_class, scales = "free")
-ggplotly(gg)
-```
-
-Row {data-height=500}
--------------------------------------
-
-### 各班型HCT组微信添加率分布 
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = add_wx_rate)) + 
-    geom_boxplot() + 
-    geom_point(aes(color = group_city, 
-                   text = paste0(group_name, "/", enroll_total)), 
-               size = 0.5, alpha = 0.8) + 
-    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
-    facet_grid(. ~ group_class, scales = "free")
-ggplotly(gg)
-```
-
-Row {data-height=500}
--------------------------------------
-
-### 各班型HCT组首课到课率分布 
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = unit1_attend_rate)) + 
-    geom_boxplot() + 
-    geom_point(aes(color = group_city, 
-                   text = paste0(group_name, "/", enroll_total)), 
-               size = 0.5, alpha = 0.8) + 
-    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
-    facet_grid(. ~ group_class, scales = "free")
-ggplotly(gg)
-```
-
-Row {data-height=500}
--------------------------------------
-
-### 各班型HCT组5课完课率分布 
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
-    geom_boxplot() + 
-    geom_point(aes(color = group_city, 
-                   text = paste0(group_name, "/", enroll_total)), 
-               size = 0.5, alpha = 0.8) + 
-    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
-    facet_grid(. ~ group_class, scales = "free")
-ggplotly(gg)
-```
-
-
-Row {data-height=500}
--------------------------------------
-
-### 各班型HCT组完课续报率分布 
-```{r}
-gg <- res %>% 
-  ggplot(aes(x = term_name, y = unit5_apply_rate)) + 
-    geom_boxplot() + 
-    geom_point(aes(color = group_city, 
-                   text = paste0(group_name, "/", enroll_total)), 
-               size = 0.5, alpha = 0.8) + 
-    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
-    facet_grid(. ~ group_class, scales = "free")
 ggplotly(gg)
 ```
 
@@ -2606,8 +2471,10 @@ showDT(by_term_hct)
 showDT(by_term_hct_ct %>% select(-term_id, -classopen_date))
 ```
 
-用户
+大盘用户
 =====================================
+
+`r params$n_month`个月内少儿常规大盘用户结构占比及续报率
 
 Row
 -------------------------------------
@@ -2675,7 +2542,7 @@ highchart() %>%
         ))
 ```
 
-Row
+Row渠道
 -------------------------------------
 
 ```{r}
@@ -2700,46 +2567,37 @@ res <- dat %>%
 ### 渠道占比
 
 ```{r}
-
 highchart() %>% 
-  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = l1_order_channel)) %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = enroll_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
   hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
           plotBands = list(list(
               label = list(text = ""),
               color = "rgba(100, 0, 0, 0.1)",
               from = params$cur_x-1, to = params$cur_x))
           ) %>% 
-  hc_colors(c("black","#53b400","#00b6eb","lightgrey","#c9a215","#a58aff","#ee6bda","lightgrey")) %>%
-  hc_legend(verticalAlign = "top") %>% 
-  hc_plotOptions(
-        series = list(
-          dataLabels = list(enabled = TRUE)
-        ))
+  hc_colors(c(color$channel,"lightgrey")) %>%
+  hc_legend(verticalAlign = "top")
 ```
 
 ### 渠道续报率
 
 ```{r}
-res <- res %>% filter(enroll_rate > 3, apply_rate > 2, !is.na(l1_order_channel))
+res <- res %>% filter(apply_rate > 1)
 
 highchart() %>% 
   hc_add_series(res, "line", 
-                hcaes(x = term_label, y = apply_rate, group = l1_order_channel)) %>% 
-  hc_add_series(res, type = "scatter", 
-                hcaes(x = term_label, y = apply_rate, group = l1_order_channel, size = enroll_rate),
-                maxSize = "10%", dataLabels = list(enabled = FALSE)) %>%
-  hc_colors(c("#53b400","#00b6eb","lightgrey","#c9a215","#a58aff","#ee6bda")) %>%
+                hcaes(x = term_label, y = apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_colors(color$channel) %>%
   hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
           plotBands = list(list(
               label = list(text = ""),
               color = "rgba(100, 0, 0, 0.1)",
               from = params$cur_x-1, to = params$cur_x))
           ) %>% 
-  hc_legend(verticalAlign = "top") %>% 
-  hc_plotOptions(
-        series = list(
-          dataLabels = list(enabled = TRUE)
-        ))
+  hc_legend(verticalAlign = "top")
 ```
 
 Row
@@ -2764,7 +2622,7 @@ res <- dat %>%
     )
 ```
 
-### 高低年级占比
+### 高低课占比
 
 ```{r}
 highchart() %>% 
@@ -2783,7 +2641,7 @@ highchart() %>%
         ))
 ```
 
-### 高低年级续报率
+### 高低课续报率
 
 ```{r}
 res <- res %>% filter(enroll_rate>1, apply_rate > 2, !is.na(package_grade))
@@ -2858,9 +2716,6 @@ res <- res %>% filter(enroll_rate > 1, apply_rate > 2)
 highchart() %>% 
   hc_add_series(res, "line", 
                 hcaes(x = term_label, y = apply_rate, group = pay_grade)) %>% 
-  hc_add_series(res, type = "scatter", 
-                hcaes(x = term_label, y = apply_rate, group = pay_grade, size = enroll_rate),
-                maxSize = "5%", dataLabels = list(enabled = FALSE)) %>%
   hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
           plotBands = list(list(
               label = list(text = ""),
@@ -3157,49 +3012,6 @@ DT::datatable(
     formatStyle(grep("rate|prop", names_dt), fontStyle = "italic")
 ```
 
-### 按
-
-```{r}
-by_date_pay_join <- dat %>% 
-  filter(
-    l1_pay_time > "2021-01-01") %>% 
-  mutate(
-    l1_pay_time = as.Date(l1_pay_time),
-    user_class_start_time = as.Date(user_class_start_time)) %>% 
-  group_by(term_label, l1_pay_time, user_class_start_time) %>% 
-  summarise(
-    enroll_total = n_distinct(user_id, na.rm = TRUE),
-    ct_total = n_distinct(counselor_id, na.rm = TRUE),
-    add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
-    subscribe_rate = mean(is_subscribe, na.rm = TRUE),
-    unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
-    unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
-    loss_1_5_rate = 1 - unit5_finish_rate/unit1_attend_rate,
-    grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
-    grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
-    referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE)
-    ) %>% 
-  mutate(
-    across(ends_with("rate"), ~ round(.x *100, 1)),
-    across(ends_with("time"), ~ format(.x, "%Y-%m-%d"))
-    ) %>% 
-  arrange(desc(term_label), desc(l1_pay_time), desc(user_class_start_time))
-```
-
-```{r}
-names_dt <- names(by_date_pay_join)
-DT::datatable(
-  by_date_pay_join,
-    class = "display compact",
-    #filter = "top",
-    colnames = headers[names_dt,],
-    rownames = FALSE,
-    options = list(
-      pageLength = 20
-    )) %>% 
-    formatRound(grepl("rate|prop", names_dt), 2) %>% 
-    formatStyle(grep("rate|prop", names_dt), fontStyle = "italic") 
-```
 
 <!-- 预测 {data-icon="fa-signal"} -->
 <!-- =====================================  -->
