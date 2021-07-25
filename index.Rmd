@@ -11,7 +11,7 @@ params:
   cur_term_id: 1704
   n_month_overall: 6
   n_month: 3
-  cur_x: 9
+  cur_x: 10
 ---
 
 ```{r setup, include=FALSE}
@@ -20,5 +20,3211 @@ knitr::read_chunk('setup.R')
 
 ```{r setup, echo=FALSE, cache=FALSE}
 ```
+
+```{r data, include=FALSE, cache=FALSE}
+dat <- readRDS(paste0("~/Documents/hetao/data/dat_dash_oops.rds"))
+```
+
+```{r eval=FALSE, include=FALSE}
+dat <- dat %>% 
+  filter(term_id == 1905,
+         group_name %in% c("西安少儿班主任璎珞组","西安班主任天翊组","西安班主任花瑶组")) %>% 
+  rbind(
+    dat %>% filter(term_id != 1905)
+  )
+```
+
+```{r}
+dat_class <- dat %>% 
+    filter(
+      classopen_date >= "2021-06-18"
+    ) %>% 
+    mutate(
+      term_name = ifelse(term_id == 1888, "2021暑假-第1期-早鸟",
+                   as.character(term_name)),
+      group_class = ifelse(str_detect(term_remarks, "转介绍"), "转介绍",
+                       ifelse(str_detect(term_remarks, "编数"), "编数同带",
+                          ifelse(str_detect(term_tag_name, "ABCD"), 
+                               ifelse(user_level != "D" | is.na(user_level), "ABC", "D"),
+                               NA)))
+    ) 
+```
+
+
+学期 {data-icon="fa-globe"}
+=====================================
+
+数据更新至 `r max(dat$l1_pay_time, na.rm = TRUE)`
+
+```{r, echo=FALSE}
+by_term <- dat %>% 
+    filter(classopen_date > Sys.Date() - 30*12) %>% 
+    group_by(term_id, term_name, term_remarks, classopen_date) %>% 
+    summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      grade_low_prop = mean(package_grade == "LOW", na.rm = TRUE),
+      referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE),
+      grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+      ct_total = n_distinct(counselor_id, na.rm = TRUE),
+      ct_enroll_total = round(enroll_total/ct_total),
+      apply_total = n_distinct(ifelse(is_renewal == 1, user_id, NA), na.rm = TRUE),
+      apply_rate = apply_total/enroll_total,
+      apply_2_rate = n_distinct(ifelse(is_renewal_2 == 1, user_id, NA), na.rm = TRUE)/enroll_total,
+      subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+      #subscribe_rate_1 = mean(ifelse(difftime(first_sub_time, l1_pay_time) <= 0, 1, 0)),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      across(c(unit1_attend_time, unit5_finish_time),
+             ~ mean(ifelse(is.na(.x), 0, 1)),
+             .names = "{.col}_rate"),
+      unit5_apply_rate = apply_rate/unit5_finish_time_rate
+    ) %>% 
+    #arrange(desc(classopen_date)) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 1)),
+      across(ends_with("prop"), ~ round(.x *100, 0))
+      ) %>%
+    mutate(
+      status = ifelse(Sys.Date() <= classopen_date, 
+                      paste0("距开课", difftime(classopen_date, Sys.Date()), "天"), 
+                  ifelse(apply_rate > 2, "续报",
+                    ifelse(unit5_finish_time_rate > 1, "5课完", 
+                       ifelse(unit1_attend_time_rate > 1, "开课中", ""))))
+    ) %>% 
+    relocate(group_cols(), status,
+           starts_with("enroll_"), starts_with("apply_"),
+           starts_with("ct_"))
+```
+
+Row {.tabset .tabset-fade data-height=550}
+-------------------------------------
+
+### 续报率
+
+```{r}
+res <- dat %>% 
+    filter(classopen_date > Sys.Date() - 30*params$n_month_overall) %>% 
+    group_by(term_label) %>% 
+    summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_d1_rate = n_distinct(ifelse(is_apply == 1 & renewal_dayn <= 0, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      apply_d2_rate = n_distinct(ifelse(is_apply == 1 & renewal_dayn <= 1, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      apply_d3_rate = n_distinct(ifelse(is_apply == 1 & renewal_dayn <= 2, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      apply_d4_rate = n_distinct(ifelse(is_apply == 1 & renewal_dayn <= 3, user_id, NA), 
+                           na.rm = TRUE)/enroll_total,
+      apply_rate = n_distinct(ifelse(is_apply == 1, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      unit5_finish_time_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      apply_5f_rate = apply_rate/unit5_finish_time_rate
+    ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    filter(apply_rate > 2) 
+```
+
+```{r}
+highchart() %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_d1_rate, size = enroll_total), 
+                name = "首日续报", color = "black") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_d2_rate), 
+                name = "2日续报", color = "#D3D3D3") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_d3_rate), 
+                name = "3日续报", color = "silver") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_d4_rate), 
+                name = "4日续报", color = "silver") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_rate), 
+                name = "总续报", color = "#00b6eb") %>%
+  hc_xAxis(title = "", type = "category", categories = res$term_label, 
+           labels = list(align = "right", rotation =  -45, overflow = none, direction = "rtl") ) %>% 
+  hc_yAxis(text = "续报率") %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit5_finish_time_rate), 
+                name = "5课完课率", color = "lightgrey") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_rate), 
+                name = "续报率", color = "#00b6eb") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_5f_rate), 
+                name = "完课续报率", color = "black") %>%
+  hc_xAxis(title = "", type = "category", categories = res$term_label, 
+           labels = list(align = "right", rotation =  -45, overflow = none) ) %>% 
+  hc_yAxis(text = "续报率") %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 微信率
+
+```{r}
+res <- dat %>% 
+    filter(classopen_date > Sys.Date() - 30*params$n_month_overall) %>% 
+    mutate(
+      is_add_wx = ifelse(is.na(add_wx_time), 0, 1),
+      addWx_dayn = as.Date(add_wx_time) - as.Date(user_class_start_time)) %>% 
+    group_by(term_label) %>% 
+    summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      y1_rate = n_distinct(ifelse(is_add_wx == 1 & addWx_dayn <= 0, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      y2_rate = n_distinct(ifelse(is_add_wx == 1 & addWx_dayn <= 1, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      y3_rate = n_distinct(ifelse(is_add_wx == 1 & addWx_dayn <= 2, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      y4_rate = mean(ifelse(is.na(add_wx_time), 0, 1))
+    ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 0))
+      ) %>% 
+    filter(y4_rate > 10) 
+```
+
+```{r}
+highchart() %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = y1_rate, size = enroll_total), 
+                name = "首日微信率", color = "grey") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = y2_rate), 
+                name = "2日微信率", color = "silver") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = y3_rate), 
+                name = "3日微信率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = y4_rate), 
+                name = "总微信率", color = "black") %>%
+  hc_xAxis(title = "", type = "category", categories = res$term_label, 
+           labels = list(align = "right", rotation =  -45, overflow = none) ) %>% 
+  hc_yAxis(text = "微信率") %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 完课率
+
+```{r include=FALSE}
+res <- dat %>% 
+    filter(classopen_date > Sys.Date() - 30*params$n_month_overall) %>% 
+    group_by(term_label) %>% 
+    summarise(
+      .groups = "keep",
+      across(c(unit1_attend_time,
+               unit1_finish_time,
+               unit2_finish_time,
+               unit3_finish_time,
+               unit4_finish_time,
+               unit5_finish_time),
+       ~ mean(ifelse(is.na(.x), 0, 1)), .names = "{.col}_rate"),
+      apply_rate = mean(is_apply, na.rm = TRUE)
+    ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 0))
+      ) 
+```
+
+```{r}
+highchart() %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit1_attend_time_rate), 
+                name = "首课到课率", color = "black") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit1_finish_time_rate), 
+                name = "首课完课率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit2_finish_time_rate), 
+                name = "2课完课率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit3_finish_time_rate), 
+                name = "3课完课率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit4_finish_time_rate), 
+                name = "4课完课率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = unit5_finish_time_rate), 
+                name = "5课完课率", color = "silver") %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = apply_rate), 
+                name = "续报率", color = "#00b6eb") %>%
+  hc_xAxis(title = "", type = "category", categories = res$term_label, 
+           labels = list(align = "right", rotation =  -45, overflow = none, direction = "rtl") ) %>% 
+  hc_yAxis(text = "率") %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 流量池
+
+```{r}
+res <- dat %>% 
+    filter(classopen_date > Sys.Date() - 30*params$n_month_overall) %>% 
+    mutate(
+      dayn = as.Date(user_class_start_time) - as.Date(l1_pay_time)) %>% 
+    group_by(term_label) %>% 
+    summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      y1_rate = n_distinct(ifelse((user_class_start_time - l1_pay_time) < 60*30, user_id, NA), 
+                                 na.rm = TRUE)/enroll_total,
+      y2_rate = n_distinct(ifelse(dayn <= 1, user_id, NA), na.rm = TRUE)/enroll_total,
+      y3_rate = n_distinct(ifelse(dayn <= 2, user_id, NA), na.rm = TRUE)/enroll_total,
+      y4_rate = n_distinct(ifelse(dayn <= 3, user_id, NA), na.rm = TRUE)/enroll_total
+    ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 0))
+      ) 
+```
+
+
+```{r}
+highchart() %>%
+  hc_add_series(res, "line", hcaes(x = term_label, y = y1_rate), 
+                name = "立即进班", color = "black") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = y2_rate), 
+                name = "2日内进班", color = "black") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = y3_rate), 
+                name = "3日内进班", color = "silver") %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = y4_rate), 
+                name = "4日内进班", color = "silver") %>%
+  hc_xAxis(title = "", type = "category", categories = res$term_label, 
+           labels = list(align = "right", rotation =  -45, overflow = none) ) %>% 
+  hc_yAxis(text = "进班率") %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 过程数据
+
+```{r}
+res <- dat %>% 
+  filter(classopen_date > Sys.Date() - 30) %>% 
+  group_by(term_name) %>% 
+  summarise(
+    add_wx_rate = round(mean(ifelse(is.na(add_wx_time), 0, 1))*100, 0)
+  ) %>% 
+  left_join(
+    dat %>% 
+      filter(classopen_date > Sys.Date() - 30) %>% 
+      group_by(term_name) %>% 
+      getRates_detail(),
+    by = c("term_name")
+  ) %>% 
+  pivot_longer(
+    cols = ends_with("rate"),
+    names_to = "stage",
+    values_to = "rate"
+  ) %>% 
+  mutate(rate = ifelse(rate == 0, NA, rate))
+```
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = stage, y = rate, group = term_name),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$stage)) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+Row {.tabset .tabset-fade data-height=900}
+-------------------------------------
+
+### 学期数据
+
+```{r}
+showDT(
+  by_term %>%
+    arrange(desc(classopen_date))
+)
+```
+
+### 学期过程数据
+
+```{r}
+by_term_detail <- dat %>% 
+    filter(classopen_date > "2020-01-01") %>% 
+    group_by(term_id, term_name, term_remarks, classopen_date) %>% 
+    getRates_detail() %>% 
+    arrange(desc(classopen_date))
+```
+
+```{r}
+showDT(by_term_detail)
+```
+
+
+### 学期整体
+
+```{r}
+by_term_name <- dat %>% 
+    filter(classopen_date > "2020-01-01") %>% 
+    group_by(term_name) %>% 
+    summarise(
+      classopen_date = min(classopen_date),
+      .enroll_total = n_distinct(user_id, na.rm = TRUE),
+      grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+      referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE),
+      grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+      ct_total = n_distinct(counselor_id, na.rm = TRUE),
+      ct_new_rate = mean(n_term == 1, na.rm = TRUE),
+      class_size = round(.enroll_total/ct_total),
+      apply_total = n_distinct(ifelse(is_apply == 1, user_id, NA), na.rm = TRUE),
+      apply_rate = apply_total/.enroll_total,
+      apply_2_rate = n_distinct(ifelse(is_renewal_2 == 1, user_id, NA), na.rm = TRUE)/.enroll_total,
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1))
+    ) %>% 
+    arrange(desc(classopen_date)) %>% 
+    mutate(
+      enroll_total = paste0(round(.enroll_total/1000, 0), "k"),
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>%
+    select(-starts_with(".")) %>% 
+    select(term_name, 
+           starts_with("enroll_"), starts_with("apply_"),
+           ct_total, ct_new_rate, class_size, 
+           everything())
+```
+
+```{r}
+showDT(by_term_name)
+```
+
+### 班型
+
+```{r}
+dat_class <- dat %>% 
+    filter(
+      classopen_date >= "2021-06-18"
+    ) %>% 
+    mutate(
+      term_name = ifelse(term_id == 1888, "2021暑假-第1期-早鸟",
+                   as.character(term_name)),
+      group_class = ifelse(str_detect(term_remarks, "转介绍"), "转介绍",
+                       ifelse(str_detect(term_remarks, "编数"), "编数同带",
+                          ifelse(str_detect(term_tag_name, "ABCD"), 
+                               ifelse(user_level != "D" | is.na(user_level), "ABC", "D"),
+                               NA)))
+    ) 
+```
+
+```{r}
+res <- dat_class %>% 
+  group_by(group_class, term_name) %>% 
+  getRates() %>% 
+  mutate(
+      apply_diff_rate = apply_2_rate - lag(apply_2_rate, order_by = term_name)
+    ) 
+```
+
+```{r}
+showDT(res %>% 
+         arrange(desc(term_name)) %>% 
+         select(-enroll_rate, -apply_total, -apply_rate) %>% 
+         relocate(term_name, group_class, starts_with("enroll"), starts_with("apply")) 
+)
+```
+
+专业编程 {data-navmenu="班型"}
+=====================================
+
+```{r}
+res0 <- dat_class %>% 
+  filter(group_class == "ABC")
+```
+
+概览 
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_class) %>% 
+  getRates()
+```
+
+
+### 续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate), name = "年课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_2_rate), name = "年课+季课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 微信添加
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = add_wx_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 首课到课
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 课中留存
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city, group_name) %>% 
+  getRates()
+```
+
+### HCT续报率分布
+
+```{r}
+gg <- res %>%
+  filter(!is.na(group_name),
+           enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = group_name), size = 1) + 
+      geom_text(aes(label = group_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city, counselor_name) %>% 
+  getRates()
+```
+
+### CT续报率分布
+
+```{r}
+gg <- res %>%
+  filter(enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = counselor_name), size = 1) + 
+      labs( x = "", y = "ct续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+渠道
+-------------------------------------
+
+> 渠道
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, l1_order_channel) %>% 
+  getRates() %>%     
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  #hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+城市
+-------------------------------------
+
+> 城市
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city) %>% 
+  getRates() %>%     
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+温度编程 {data-navmenu="班型"}
+=====================================
+
+```{r}
+res0 <- dat_class %>% 
+  filter(group_class == "D")
+```
+
+概览 
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_class) %>% 
+  getRates()
+```
+
+### 续报-D
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate), name = "年课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_2_rate), name = "年课+季课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 微信添加-D
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = add_wx_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 首课到课-D
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 课中留存-D
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报-D
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "D") %>% 
+  group_by(term_name, group_city, group_name) %>% 
+  getRates()
+```
+
+### HCT续报率分布-D
+
+```{r}
+gg <- res %>%
+  filter(!is.na(group_name),
+           enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = group_name), size = 1) + 
+      geom_text(aes(label = group_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "D") %>% 
+  group_by(term_name, group_city, counselor_name) %>% 
+  getRates()
+```
+
+### CT续报率分布-D
+
+```{r}
+gg <- res %>%
+  filter(enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = counselor_name), size = 1) + 
+      geom_text(aes(label = counselor_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+渠道
+-------------------------------------
+
+> 渠道
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, l1_order_channel) %>% 
+  getRates() %>%     
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  #hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+城市
+-------------------------------------
+
+> 城市
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city) %>% 
+  getRates() %>%   
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+转介绍 {data-navmenu="班型"}
+=====================================
+
+```{r}
+res0 <- dat_class %>% 
+  filter(group_class == "转介绍")
+```
+
+概览 
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_class) %>% 
+  getRates()
+```
+
+### 续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate), name = "年课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  #hc_add_series(res, type = "scatter", hcaes(x = term_name, y = apply_rate, size = enroll_total),
+  #              name = "",  maxSize = "15%") %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  #hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 微信添加
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = add_wx_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 首课到课
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 课中留存
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "转介绍") %>% 
+  group_by(term_name, group_city, group_name) %>% 
+  getRates()
+```
+
+### HCT续报率分布-转介绍
+
+```{r}
+gg <- res %>%
+  filter(!is.na(group_name),
+           enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = group_name), size = 1) + 
+      geom_text(aes(label = group_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "转介绍") %>% 
+  group_by(term_name, group_city, counselor_name) %>% 
+  getRates()
+```
+
+### CT续报率分布-转介绍
+
+```{r}
+gg <- res %>%
+  filter(enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = counselor_name), size = 1) + 
+      geom_text(aes(label = counselor_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+城市
+-------------------------------------
+
+> 城市
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city) %>% 
+  getRates() %>%   
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+编数同带 {data-navmenu="班型"}
+=====================================
+
+概览 
+-------------------------------------
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "编数同带") %>% 
+  group_by(term_name, group_class) %>% 
+  getRates() %>% 
+  left_join(
+    dat_class %>% 
+      filter(group_class == "编数同带") %>% 
+      group_by(term_name) %>%
+      summarise(
+        apply_m_rate = round(n_distinct(ifelse(is_renewal_math == 1, user_id, NA), na.rm = TRUE)/n_distinct(user_id, na.rm = TRUE)*100, 1)
+      ),
+    by = c("term_name")
+  )
+```
+
+### 续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate), name = "年课续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_m_rate), name = "数学续报",
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 微信添加
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = add_wx_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 首课到课
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 课中留存
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_class),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(c("#53b400","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top")
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "编数同带") %>% 
+  group_by(term_name, group_city, group_name) %>% 
+  getRates()
+```
+
+### HCT续报率分布-编数同带
+
+```{r}
+gg <- res %>%
+  filter(!is.na(group_name),
+           enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = group_name), size = 1) + 
+      geom_text(aes(label = group_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+```{r}
+res <- dat_class %>% 
+  filter(group_class == "编数同带") %>% 
+  group_by(term_name, group_city, counselor_name) %>% 
+  getRates()
+```
+
+### CT续报率分布-编数同带
+
+```{r}
+gg <- res %>%
+  filter(enroll_total > 10) %>%
+  ggplot( aes(x = term_name, y = apply_2_rate)) +
+      geom_boxplot(color = "darkgrey") +
+      geom_point(aes(color = group_city, text = counselor_name), size = 1) + 
+      geom_text(aes(label = counselor_name, color = group_city), size = 3) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+渠道
+-------------------------------------
+
+> 渠道
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, l1_order_channel) %>% 
+  getRates() %>%     
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  #hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+城市
+-------------------------------------
+
+> 城市
+
+-------------------------------------
+
+```{r}
+res <- res0 %>% 
+  group_by(term_name, group_city) %>% 
+  getRates() %>%   
+  filter(enroll_total > 100) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+```
+
+### 占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top") 
+```
+
+### 首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit1_attend_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = retent_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = unit5_apply_rate, group = group_city),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_name)) %>% 
+  hc_colors(color$group_city) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+渠道
+=====================================
+
+```{r channel}
+by_term_channel <- dat %>%
+    filter(classopen_date > Sys.Date() - 180,
+           !is.na(l1_order_channel)
+          ) %>% 
+    group_by(classopen_date, term_label, l1_order_channel) %>%
+    summarise(
+      .groups = "drop_last",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_rate = mean(is_apply, na.rm = TRUE),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      retent_rate = unit5_finish_rate/unit1_attend_rate,
+      unit5_apply_rate = apply_rate/unit5_finish_rate,
+      grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+      grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+      price_0_rate = mean(l1_pay_amount == 0, na.rm = TRUE)
+      ) %>% 
+    mutate(
+      enroll_rate = enroll_total/sum(enroll_total),
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    group_by(l1_order_channel, .add = TRUE) %>% 
+    relocate(group_cols(),
+           starts_with("enroll_"))
+```
+
+
+```{r eval=FALSE, include=FALSE}
+by_term_channel %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*2,
+    str_detect(term_label, "常规|分层"),
+    !str_detect(term_label, "1435"),
+    apply_rate > 2
+  ) %>% 
+  group_by(l1_order_channel) %>% 
+  select(term_label, apply_rate, enroll_rate) %>% 
+  mutate(
+    apply_diff_rate = apply_rate - dplyr::lag(apply_rate, n = 1, default = 0),
+    diff_enroll_rate = enroll_rate - dplyr::lag(enroll_rate, n = 1, default = 0),
+    attr_rate = enroll_rate*apply_rate/100,
+    diff_attr_rate = attr_rate - dplyr::lag(attr_rate, n = 1, default = 0)
+  ) %>% view()
+  ungroup() %>% 
+  mutate(apply_attr = enroll_rate*apply_rate/100) %>% 
+  select(term_label, l1_order_channel, apply_attr) %>% 
+  pivot_wider(names_from = term_label, values_from = apply_attr) %>% 
+  view()
+```
+
+
+Row
+-------------------------------------
+
+### 渠道占比 {.tabset .tabset-fade data-height=500}
+
+```{r}
+res <- by_term_channel %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*2,
+    str_detect(term_label, "常规|分层"),
+    !str_detect(term_label, "1435|1905"), # 春16期包含858测试
+    enroll_total > 80
+    ) %>% 
+  mutate(
+    across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+    )
+
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = term_label, y = enroll_rate, 
+                                          group = l1_order_channel)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+
+```
+
+
+### 渠道续报率
+
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = term_label, y = apply_rate, 
+                                          group = l1_order_channel)) %>% 
+  hc_add_series(res, type = "scatter", hcaes(x = term_label, y = apply_rate,
+                group = l1_order_channel, size = enroll_rate), 
+                maxSize = "15%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE),
+            marker = list(radius = 3)
+          ))
+```
+
+Row
+-------------------------------------
+
+### 渠道首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = term_label, y = unit1_attend_rate, 
+                                          group = l1_order_channel)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$channel) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 渠道完课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = term_label, y = unit5_finish_rate, 
+                                          group = l1_order_channel)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "5课完课率") %>% 
+  hc_colors(color$channel) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 渠道完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", hcaes(x = term_label, y = unit5_apply_rate, 
+                                          group = l1_order_channel)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "完课续报率") %>% 
+  hc_colors(color$channel) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE),
+            marker = list(radius = 3)
+          ))
+```
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+```{r}
+grp_data <- dat %>% 
+  filter(
+    !is.na(l1_order_channel),
+    !term_name %in% c("2021春季-第16期")
+  ) %>% 
+  group_by(term_name, l1_order_channel)
+
+res <- getRates(grp_data)
+```
+
+### 渠道占比
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = enroll_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+
+### 渠道续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_name, y = apply_rate, group = l1_order_channel),
+                dataLabels = list(enabled = TRUE)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_colors(color$channel) %>%
+  hc_legend(verticalAlign = "top")
+```
+
+### 渠道招生量
+
+```{r}
+ggplotly({
+  by_term_channel %>% 
+   filter(
+    classopen_date > Sys.Date() - 30*3
+    ) %>% 
+  ggplot( aes(x = term_label)) +
+      geom_bar(aes(y = enroll_total, fill = l1_order_channel), alpha = 0.7, stat = "identity") +
+      geom_line(aes(y = apply_rate)) +
+      labs(x = "", y = "") +
+      scale_fill_discrete(name = "渠道")
+})
+```
+
+Row
+-------------------------------------
+
+```{r}
+by_term_channel <- dat %>%
+    filter(classopen_date > Sys.Date() - 180,
+           !is.na(l1_order_channel)
+          ) %>% 
+    group_by(classopen_date, term_name, l1_order_channel) %>%
+    summarise(
+      .groups = "drop_last",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_rate = mean(is_apply, na.rm = TRUE),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      retent_rate = unit5_finish_rate/unit1_attend_rate,
+      unit5_apply_rate = apply_rate/unit5_finish_rate,
+      grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+      grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+      price_0_rate = mean(l1_pay_amount == 0, na.rm = TRUE)
+      ) %>% 
+    mutate(
+      enroll_rate = enroll_total/sum(enroll_total),
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    group_by(l1_order_channel, .add = TRUE) %>% 
+    relocate(group_cols(),
+           starts_with("enroll_"))
+
+showDT(
+  by_term_channel %>% 
+  mutate(
+      apply_diff_rate = apply_rate - lag(apply_rate, order_by = term_name)
+    ) %>% 
+  ungroup() %>% select(-classopen_date) %>% 
+  group_by(term_name,l1_order_channel)
+)
+```
+
+
+城市
+=====================================
+
+```{r data_by_term_city}
+by_term_city <- dat %>%
+    filter(classopen_date > Sys.Date() - 30*3,
+           !is.na(group_city)) %>% 
+    group_by(term_label, group_city) %>%
+    summarise(
+      ct_total = n_distinct(counselor_id, na.rm = TRUE),
+      ct_new_total = n_distinct(ifelse(n_term == 1, counselor_id, NA), na.rm = TRUE),
+      ct_new_rate = mean(n_term == 1, na.rm = TRUE),
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_rate = mean(is_apply, na.rm = TRUE),
+      class_size = round(enroll_total/ct_total),
+      add_wx_rate = n_distinct(ifelse(is.na(add_wx_time), NA, user_id), na.rm = TRUE)/enroll_total,
+      subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      retent_rate = unit5_finish_rate/unit1_attend_rate,
+      unit5_apply_rate = apply_rate/unit5_finish_rate,
+      grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+      referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE),
+      grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+      price_0_rate = mean(l1_pay_amount == 0, na.rm = TRUE),
+      classopen_date = min(classopen_date)
+      ) %>% 
+    mutate(
+      enroll_rate = enroll_total/sum(enroll_total),
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    group_by(group_city, .add = TRUE) %>% 
+    select(group_cols(), 
+           starts_with("ct_"),starts_with("enroll"),
+           everything())
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- by_term_city %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*2,
+    str_detect(term_label, "常规|分层"),
+    !str_detect(term_label, "1435|1905"), # 春16期包含858测试
+    apply_rate > 2,
+    enroll_total > 80
+    )
+```
+
+### 城市加微信率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = add_wx_rate, group = group_city)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 城市首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit1_attend_rate, group = group_city)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(color$group_city) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 城市留存率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = retent_rate, group = group_city)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "5课完课率") %>% 
+  hc_colors(color$group_city) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 城市完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit5_apply_rate, group = group_city)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "完课续报率") %>% 
+  hc_colors(color$group_city) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE),
+            marker = list(radius = 3)
+          ))
+```
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+### 城市续报率
+
+```{r}
+ggplotly({
+  by_term_city %>%
+    filter(apply_rate > 2,
+           str_detect(term_label, "常规|分层"), 
+           !str_detect(term_label, "1435")) %>% 
+  ggplot( aes(x = term_label, y = apply_rate, group = group_city)) +
+      geom_line(aes(color = group_city), size = 1) +
+      geom_point(aes(color = group_city, size = enroll_total), alpha = 0.55) +
+      labs( x = "", y = "续报率") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+})
+```
+
+### 城市招生量
+
+```{r}
+ggplotly({
+  by_term_city %>% 
+  ggplot( aes(x = term_label)) +
+      geom_bar(aes(y = enroll_total, fill = group_city), alpha = 0.7, stat = "identity") +
+      geom_line(aes(y = apply_rate)) +
+      labs(x = "", y = "") +
+      scale_fill_discrete(name = "城市")
+})
+```
+
+Row
+-------------------------------------
+
+```{r}
+showDT(by_term_city %>% 
+         select(-classopen_date) %>% 
+         arrange(desc(term_label), desc(enroll_total)) 
+)
+```
+
+班型总览 {data-navmenu="班型"}
+=====================================
+
+```{r}
+grp_data  <-  dat_class %>% 
+  filter(
+    !is.na(group_class)
+     ) %>%
+  group_by(term_name, group_class)
+
+res <- getRates(grp_data) %>% 
+  left_join(
+    grp_data %>% 
+      mutate(addWx_dayn = as.Date(add_wx_time) - as.Date(user_class_start_time)) %>%
+      summarise(
+        .enroll_total = n_distinct(user_id, na.rm = TRUE),
+        add_wx_d1_rate = n_distinct(ifelse(addWx_dayn <= 0, 
+                                           user_id, NA), na.rm = TRUE)/.enroll_total,
+        add_wx_d2_rate = n_distinct(ifelse(addWx_dayn <= 1, 
+                                           user_id, NA), na.rm = TRUE)/.enroll_total,
+        add_wx_d3_rate = n_distinct(ifelse(addWx_dayn <= 2, 
+                                           user_id, NA), na.rm = TRUE)/.enroll_total,
+        .groups = "drop_last"
+      ) %>% 
+      mutate(across(ends_with("rate"), ~ round(.x *100, 0))) %>% 
+      select(-.enroll_total)
+    , by = group_vars(grp_data)
+  ) %>% 
+  filter(enroll_rate > 5)
+```
+
+Row
+-------------------------------------
+
+### 各班型续报率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = apply_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_text(aes(label = apply_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+### 各班型微信添加率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = add_wx_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_line(aes(y = add_wx_d1_rate, group = group_class, color = group_class),
+              color = "grey") + 
+    geom_line(aes(y = add_wx_d2_rate, group = group_class, color = group_class),
+            color = "grey") + 
+    geom_line(aes(y = add_wx_d3_rate, group = group_class, color = group_class),
+            color = "grey") + 
+    geom_text(aes(label = add_wx_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+```{r}
+gg <- res %>% 
+  filter(term_name %in% c("2021暑假-第1期","2021暑假-第2期","2021暑假-第3期","2021暑假-第4期")) %>% 
+  ggplot(aes(x = group_class, y = add_wx_rate)) + 
+    geom_point(aes(color = term_name)) +
+    geom_line(aes(group = term_name, color = term_name, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_line(aes(y = add_wx_d1_rate, group = term_name, color = term_name),
+              color = "grey") + 
+    geom_line(aes(y = add_wx_d2_rate, group = term_name, color = term_name),
+            color = "grey") + 
+    geom_line(aes(y = add_wx_d3_rate, group = term_name, color = term_name),
+            color = "grey") + 
+    geom_text(aes(label = add_wx_rate)) + 
+    facet_grid(. ~ term_name, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+### 各班型首课到课率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit1_attend_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_text(aes(label = unit1_attend_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+### 各班型5完课率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_text(aes(label = unit5_finish_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+
+```{r}
+grp_data  <-  dat_class %>% 
+  filter(
+    !is.na(group_class)
+     ) %>%
+  group_by(term_name, group_class, group_name)
+
+res <- grp_data %>% 
+  getRates() %>% 
+  filter(enroll_total > 5)
+```
+
+### 各班型5完课率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
+    geom_point(aes(color = group_class, text = group_name), size = 0.8) +
+    geom_boxplot(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    #geom_text(aes(label = unit5_finish_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+### 各班型留存率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = retent_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_text(aes(label = retent_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+### 各班型完课续报率
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit5_apply_rate)) + 
+    geom_point(aes(color = group_class)) +
+    geom_line(aes(group = group_class, color = group_class, 
+                   text = paste0("招生量:",enroll_rate))) + 
+    geom_text(aes(label = unit5_apply_rate)) + 
+    facet_grid(. ~ group_class, scales = "free") +
+    theme(legend.position = "none")
+ggplotly(gg)
+```
+
+
+
+HCT组 {data-navmenu="班型"}
+=====================================
+
+```{r}
+res <- dat_class %>% 
+  filter(
+    !is.na(group_class),
+    term_name != "2021春季-第16期"
+     ) %>%
+  group_by(term_name, group_class, group_city, group_name) %>% 
+  getRates() %>%
+  filter(enroll_total > 10)
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### 各班型HCT组续报率分布 
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = apply_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(. ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### 各班型HCT组微信添加率分布 
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = add_wx_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(. ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### 各班型HCT组首课到课率分布 
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit1_attend_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(. ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### 各班型HCT组5课完课率分布 
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit5_finish_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(. ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+
+Row {data-height=500}
+-------------------------------------
+
+### 各班型HCT组完课续报率分布 
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = unit5_apply_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(. ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+
+HCT组高低课 {data-navmenu="班型"}
+=====================================
+
+```{r}
+res <- dat_class %>% 
+  filter(
+    !is.na(group_class),
+    term_name != "2021春季-第16期"
+     ) %>%
+  group_by(term_name, group_class, package_grade, group_city, group_name) %>% 
+  getRates() %>%
+  filter(enroll_total > 10)
+```
+
+Row {data-height=600}
+-------------------------------------
+
+### 各班型HCT组高低课续报率分布 
+
+```{r}
+gg <- res %>% 
+  ggplot(aes(x = term_name, y = apply_rate)) + 
+    geom_boxplot() + 
+    geom_point(aes(color = group_city, 
+                   text = paste0(group_name, "/", enroll_total)), 
+               size = 0.5, alpha = 0.8) + 
+    geom_text(aes(label = group_name, color = group_city), alpha = 0.7, size = 2) +
+    facet_grid(package_grade ~ group_class, scales = "free")
+ggplotly(gg)
+```
+
+hct组
+=====================================
+
+```{r data_term_hct_ct, include=FALSE}
+by_term_hct_ct <- dat %>%
+    filter(
+      classopen_date > Sys.Date() - 30*3
+    ) %>% 
+    group_by(term_label,
+             group_city, group_name, 
+             counselor_id, counselor_name, classopen_staff_id, n_term) %>%
+    summarise(
+      .groups = "keep",
+      term_id = min(term_id),
+      classopen_date = min(classopen_date),
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_total = n_distinct(ifelse(is_apply == 1, user_id, NA), na.rm = TRUE),
+      apply_rate = apply_total/enroll_total,
+      apply_high_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "HIGH"),
+                        user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "HIGH",
+                        user_id, NA), na.rm = TRUE),
+      apply_low_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "LOW"),
+                  user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "LOW",
+                  user_id, NA), na.rm = TRUE),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      unit5_apply_rate = apply_rate/unit5_finish_rate
+      ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    group_by(term_id) %>% 
+    mutate(rank = round(percent_rank(apply_rate)*100, 0)) %>% 
+    group_by(term_label,
+           group_city, group_name, 
+           counselor_name, n_term) %>%
+    filter(enroll_total > 40) %>% 
+    relocate(group_cols(),
+           starts_with("enroll_"), starts_with("apply_"))
+```
+
+```{r}
+by_term_hct <-  dat %>%
+  filter(classopen_date > Sys.Date() - 30*6,
+         !is.na(group_name)) %>% 
+  group_by(term_label, group_city, group_name) %>%
+  summarise(
+    .groups = "keep",
+    enroll_total = n_distinct(user_id, na.rm = TRUE),
+    ct_total = n_distinct(counselor_id, na.rm = TRUE),
+    ct_new_total = n_distinct(ifelse(n_term == 1, counselor_id, NA), na.rm = TRUE),
+    apply_total = n_distinct(ifelse(is_apply == 1, user_id, NA), na.rm = TRUE),
+    apply_rate = apply_total/enroll_total,
+    add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+    unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+    unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+    #loss_1_5_rate = 1 - unit5_finish_rate/unit1_attend_rate,
+    grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+    grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+    referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE)
+    ) %>% 
+  mutate(
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    ) %>% 
+  group_by(term_label) %>% 
+  mutate(rank = round(percent_rank(apply_rate)*100, 0)) %>% 
+  group_by(term_label, group_city, group_name) %>%
+  arrange(desc(term_label), desc(apply_rate)) %>% 
+  relocate(group_cols(),
+         starts_with("enroll_"), starts_with("apply_"))
+
+```
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+### hct组续报率分布
+
+```{r}
+gg <- 
+  by_term_hct %>%
+    filter(!is.na(group_name),
+           enroll_total > 10,
+           apply_rate > 2) %>%
+ ggplot( aes(x = term_label, y = apply_rate)) +
+      geom_boxplot() +
+      geom_point(aes(color = group_city, text = group_name), size = 1) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+### ct续报率分布
+
+```{r}
+gg <- 
+  by_term_hct_ct %>%
+    filter(!is.na(group_name),
+           enroll_total > 10,
+           apply_rate > 0.1) %>%
+ ggplot( aes(x = term_label, y = apply_rate)) +
+      geom_boxplot() +
+      geom_point(aes(color = group_city, text = counselor_name), size = 0.5) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+```{r eval=FALSE, include=FALSE}
+res <- by_term_hct %>%
+  filter(!is.na(group_name),
+         enroll_total > 10,
+         apply_rate > 2)
+
+
+hcboxplot(
+  x = res$apply_rate,
+  var = res$term_label,
+  name = "Length",
+  color = "black",
+  outliers = TRUE
+) %>%
+  hc_chart(type = "column") %>%
+  hc_title(text = "") %>%
+  hc_yAxis(title = list(text = "hct组续报率"),
+           labels = list(format = "{value}%")) %>%
+  hc_add_series(
+    data = res, type = "scatter",
+    hcaes(x = "term_label", y = "apply_rate", group = "group_city")
+  ) %>%
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(scatter = list(
+    #color = "red",
+    marker = list(
+      radius = 3,
+      symbol = "circle",
+      lineWidth = 1
+    ),
+    jitter = list(x = .1, y = 0)
+  )) %>% 
+  hc_tooltip(useHTML = TRUE,
+             headerFormat = "{series.name} \n
+                            学期: {point.x}
+                            续报率: {point.y}",
+             pointFormat = "")
+```
+
+```{r eval=FALSE, include=FALSE}
+res <- data_to_boxplot(by_term_hct %>% filter(enroll_total > 10, apply_rate > 2),
+                       apply_rate, group_city, term_label)
+
+highchart() %>% 
+  hc_xAxis(type = "category") %>% 
+  hc_add_series_list(res)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+gg <- 
+  by_term_hct %>%
+    filter(!is.na(group_name),
+           enroll_total > 200,
+           apply_rate > 2) %>%
+ ggplot( aes(x = fct_reorder(group_name, -apply_rate, mean), y = rank)) +
+      geom_boxplot() +
+      geom_point(aes(color = group_city, text = term_label), size = 1) + 
+      labs( x = "", y = "hct组续报率", title = "") +
+      scale_color_discrete(name = "城市", labels = c("西安","北京","成都","济南","武汉"))
+ggplotly(gg)
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>%
+  filter(
+    classopen_date > Sys.Date() - 30*2,
+    str_detect(term_label, "常规|分层"),
+    !str_detect(term_label, "1435")
+    ) %>% 
+  mutate(ct_level = ifelse(n_term == 1, "新ct", "老ct")) %>% 
+  group_by(term_label, ct_level) %>% 
+  summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_total = n_distinct(ifelse(is_apply == 1, user_id, NA), na.rm = TRUE),
+      apply_rate = apply_total/enroll_total,
+      apply_high_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "HIGH"),
+                        user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "HIGH",
+                        user_id, NA), na.rm = TRUE),
+      apply_low_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "LOW"),
+                  user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "LOW",
+                  user_id, NA), na.rm = TRUE),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      unit5_apply_rate = apply_rate/unit5_finish_rate
+      ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    filter(apply_rate > 2, enroll_total > 50)
+```
+
+### 新老ct加微信率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = add_wx_rate, group = ct_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(c("#00b6eb","#53b400","#c9a215","#a58aff","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 新老ct首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit1_attend_rate, group = ct_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(c("#00b6eb","#c9a215","#a58aff","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 新老ct完课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit5_finish_rate, group = ct_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "5课完课率") %>% 
+  hc_colors(c("#00b6eb","#c9a215","#a58aff","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### 新老ct完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit5_apply_rate, group = ct_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "完课续报率") %>% 
+  hc_colors(c("#00b6eb","#c9a215","#a58aff","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE),
+            marker = list(radius = 3)
+          ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>%
+  filter(
+    classopen_date > Sys.Date() - 30*2,
+    str_detect(term_label, "常规|分层"),
+    !str_detect(term_label, "1435")
+    ) %>% 
+  group_by(term_label, staff_gender) %>% 
+  summarise(
+      .groups = "keep",
+      enroll_total = n_distinct(user_id, na.rm = TRUE),
+      apply_total = n_distinct(ifelse(is_apply == 1, user_id, NA), na.rm = TRUE),
+      apply_rate = apply_total/enroll_total,
+      apply_high_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "HIGH"),
+                        user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "HIGH",
+                        user_id, NA), na.rm = TRUE),
+      apply_low_rate = n_distinct(ifelse((is_apply == 1 & package_grade == "LOW"),
+                  user_id, NA), na.rm = TRUE)/n_distinct(ifelse(package_grade == "LOW",
+                  user_id, NA), na.rm = TRUE),
+      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+      unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+      unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+      unit5_apply_rate = apply_rate/unit5_finish_rate
+      ) %>% 
+    mutate(
+      across(ends_with("rate"), ~ round(.x *100, 1))
+      ) %>% 
+    filter(apply_rate > 2, enroll_total > 50)
+```
+
+### ct加微信率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = add_wx_rate, group = staff_gender)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(c("#00b6eb","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### ct首课到课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit1_attend_rate, group = staff_gender)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "率") %>% 
+  hc_colors(c("#00b6eb","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### ct完课率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit5_finish_rate, group = staff_gender)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "5课完课率") %>% 
+  hc_colors(c("#00b6eb","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE)
+          ))
+```
+
+### ct完课续报率
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, type = "line", 
+                hcaes(x = term_label, y = unit5_apply_rate, group = staff_gender)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label)) %>% 
+  hc_yAxis(title = "完课续报率") %>% 
+  hc_colors(c("#00b6eb","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+          series = list(
+            dataLabels = list(enabled = TRUE),
+            marker = list(radius = 3)
+          ))
+```
+
+Row {.tabset .tabset-fade data-height=750}
+-------------------------------------
+
+### hct
+
+```{r}
+showDT(by_term_hct)
+```
+
+### ct
+
+备注： 排名值越大，续报率越高。
+
+```{r}
+showDT(by_term_hct_ct %>% select(-term_id, -classopen_date))
+```
+
+用户
+=====================================
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    !is.na(user_level),
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  group_by(term_label, user_level) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### leads进班等级占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = user_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("lightgrey","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+### leads进班等级续报率
+
+```{r}
+res <- res %>% filter(apply_rate > 1)
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = user_level)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = user_level, size = enroll_rate),
+                maxSize = "7%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("lightgrey","#00b6eb","#c9a215","#ee6bda")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  group_by(term_label, l1_order_channel) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### 渠道占比
+
+```{r}
+
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = l1_order_channel)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("black","#53b400","#00b6eb","lightgrey","#c9a215","#a58aff","#ee6bda","lightgrey")) %>%
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+### 渠道续报率
+
+```{r}
+res <- res %>% filter(enroll_rate > 3, apply_rate > 2, !is.na(l1_order_channel))
+
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = l1_order_channel)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = l1_order_channel, size = enroll_rate),
+                maxSize = "10%", dataLabels = list(enabled = FALSE)) %>%
+  hc_colors(c("#53b400","#00b6eb","lightgrey","#c9a215","#a58aff","#ee6bda")) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  group_by(term_label, package_grade) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### 高低年级占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = package_grade)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("#00b6eb","#c9a215","lightgrey")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+### 高低年级续报率
+
+```{r}
+res <- res %>% filter(enroll_rate>1, apply_rate > 2, !is.na(package_grade))
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = package_grade)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = package_grade, size = enroll_rate),
+                maxSize = "9%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("#00b6eb","#c9a215")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  group_by(term_label, pay_grade) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### 年级占比
+
+```{r}
+
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = pay_grade)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("lightgrey",rep("#c9a215",3),rep("#00b6eb",3),
+              "lightgrey","#ee6bda",rep("lightgrey",5))) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+### 年级续报率
+
+```{r}
+res <- res %>% filter(enroll_rate > 1, apply_rate > 2)
+
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = pay_grade)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = pay_grade, size = enroll_rate),
+                maxSize = "5%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c(rep("#c9a215",3),rep("#00b6eb",3),
+              "#ee6bda","red","lightgrey")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  mutate(
+    phone_city_level = factor(phone_city_level, 
+                      levels = c("一线","新一线","二线","三线","四线","五线"))
+  ) %>% 
+  group_by(term_label, phone_city_level) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### 城市占比
+
+```{r}
+
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = phone_city_level)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c(rep("#00b6eb",3),rep("#c9a215",3),"lightgrey")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+
+``` 
+
+### 城市续报率
+
+```{r}
+res <- res %>% filter(enroll_rate > 1, apply_rate > 2, !is.na(phone_city_level))
+
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = phone_city_level)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = phone_city_level, size = enroll_rate),
+                maxSize = "5%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c(rep("#00b6eb",3),rep("#c9a215",3))) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+Row
+-------------------------------------
+
+```{r}
+res <- dat %>% 
+  filter(
+    classopen_date > Sys.Date() - 30*params$n_month,
+    !term_id == 1435,
+    str_detect(term_remarks, "常规|分层")
+    ) %>% 
+  group_by(term_label, child_gender) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE), 
+    apply_rate = mean(is_apply, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>% 
+  mutate(
+    enroll_rate = enroll_total/sum(enroll_total),
+    across(ends_with("rate"), ~ round(.x *100, 1))
+    )
+```
+
+### 学生性别占比
+
+```{r}
+highchart() %>% 
+  hc_add_series(res, "line", hcaes(x = term_label, y = enroll_rate, group = child_gender)) %>% 
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("#ee6bda","#00b6eb","lightgrey","lightgrey")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+### 学生性别续报率
+
+```{r}
+res <- res %>% filter(enroll_rate > 1, !is.na(child_gender))
+highchart() %>% 
+  hc_add_series(res, "line", 
+                hcaes(x = term_label, y = apply_rate, group = child_gender)) %>% 
+  hc_add_series(res, type = "scatter", 
+                hcaes(x = term_label, y = apply_rate, group = child_gender, size = enroll_rate),
+                maxSize = "9%", dataLabels = list(enabled = FALSE)) %>%
+  hc_xAxis(title = "", type = "category", categories = unique(res$term_label),
+          plotBands = list(list(
+              label = list(text = ""),
+              color = "rgba(100, 0, 0, 0.1)",
+              from = params$cur_x-1, to = params$cur_x))
+          ) %>% 
+  hc_colors(c("#ee6bda","#00b6eb","lightgrey")) %>% 
+  hc_legend(verticalAlign = "top") %>% 
+  hc_plotOptions(
+        series = list(
+          dataLabels = list(enabled = TRUE)
+        ))
+```
+
+
+GANDALF
+=====================================
+
+Row plot{data-height=400 .tabset}
+-------------------------------------
+
+```{r}
+by_date <- dat %>%
+  filter(l1_pay_time > "2021-01-01") %>%
+  mutate(
+    l1_pay_time = as.Date(l1_pay_time)) %>% 
+  group_by(term_label, l1_pay_time) %>%
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE),
+    ct_total = n_distinct(counselor_id, na.rm = TRUE),
+    add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+    subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+    unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+    unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+    loss_1_5_rate = 1 - unit5_finish_rate/unit1_attend_rate,
+    grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+    grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+    referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE)
+    ) %>%
+  mutate(
+    across(ends_with("rate"), ~ round(.x *100, 1)),
+    across(ends_with("time"), ~ format(.x, "%Y-%m-%d"))
+    ) %>%
+  filter(
+    enroll_total > 100
+  ) %>% 
+  arrange(desc(term_label), desc(l1_pay_time))
+```
+
+```{r}
+by_date_join <- dat %>%
+  filter(user_class_start_time > "2021-01-01") %>%
+  mutate(user_class_start_time = as.Date(user_class_start_time)) %>% 
+  group_by(term_label, user_class_start_time) %>%
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE),
+    ct_total = n_distinct(counselor_id, na.rm = TRUE),
+    add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+    subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+    unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+    unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+    loss_1_5_rate = 1 - unit5_finish_rate/unit1_attend_rate,
+    grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+    grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+    referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE)
+    ) %>%
+  mutate(
+    across(ends_with("rate"), ~ round(.x *100, 1)),
+    across(ends_with("time"), ~ format(.x, "%Y-%m-%d"))
+    ) %>% 
+  arrange(desc(term_label), desc(user_class_start_time))
+```
+
+### 按购课时间
+
+```{r fig.width=14.5}
+gg <-   
+  by_date %>% 
+  filter(l1_pay_time > Sys.Date() - 30*1) %>% 
+  ggplot(aes(x = l1_pay_time, y = add_wx_rate, group = term_label)) +
+   geom_line(aes(color = term_label)) +
+   geom_point(aes(size = enroll_total, color = term_label), alpha = 0.55) +
+   labs(x = "")
+ggplotly(gg)
+
+```
+
+```{r}
+gg <- 
+  by_date %>% 
+    filter(l1_pay_time > Sys.Date() - 30*1) %>% 
+    arrange(l1_pay_time) %>% 
+  ggplot(aes(x = l1_pay_time, y = add_wx_rate, color = term_label)) +
+    geom_line()
+
+ggplotly(gg)
+```
+
+
+### 按进班时间
+
+```{r fig.width=14.5}
+ggplotly({
+  by_date_join %>% 
+  filter(
+    enroll_total > 10,
+    user_class_start_time > Sys.Date() - 30*1) %>% 
+  ggplot(aes(x = user_class_start_time, y = add_wx_rate, group = term_label)) +
+   geom_line(aes(color = term_label)) +
+   geom_point(aes(size = enroll_total, color = term_label), alpha = 0.55) +
+   labs(x = "")
+})
+```
+
+
+Row {data-height=1000 .tabset}
+-------------------------------------
+
+### 按购课时间
+
+```{r}
+names_dt <- names(by_date)
+DT::datatable(
+  by_date,
+    class = "display compact",
+    #filter = "top",
+    colnames = headers[names_dt,],
+    rownames = FALSE,
+    extensions = 'Buttons', 
+    options = list(
+      pageLength = 20,
+      dom = 'Blfrtip',
+      buttons = list('copy', "csv"))
+    ) %>%
+    formatRound(grepl("rate|prop", names_dt), 2) %>%
+    formatStyle(grep("rate|prop", names_dt), fontStyle = "italic")
+```
+
+### 按进班时间
+
+```{r}
+names_dt <- names(by_date_join)
+DT::datatable(
+  by_date_join,
+    class = "display compact",
+    #filter = "top",
+    colnames = headers[names_dt,],
+    rownames = FALSE,
+    extensions = 'Buttons', 
+    options = list(
+      pageLength = 20,
+      dom = 'Blfrtip',
+      buttons = list('copy', "csv"))
+    ) %>%
+    formatRound(grepl("rate|prop", names_dt), 2) %>%
+    formatStyle(grep("rate|prop", names_dt), fontStyle = "italic")
+```
+
+### 按
+
+```{r}
+by_date_pay_join <- dat %>% 
+  filter(
+    l1_pay_time > "2021-01-01") %>% 
+  mutate(
+    l1_pay_time = as.Date(l1_pay_time),
+    user_class_start_time = as.Date(user_class_start_time)) %>% 
+  group_by(term_label, l1_pay_time, user_class_start_time) %>% 
+  summarise(
+    enroll_total = n_distinct(user_id, na.rm = TRUE),
+    ct_total = n_distinct(counselor_id, na.rm = TRUE),
+    add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
+    subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+    unit1_attend_rate = mean(ifelse(is.na(unit1_attend_time), 0, 1)),
+    unit5_finish_rate = mean(ifelse(is.na(unit5_finish_time), 0, 1)),
+    loss_1_5_rate = 1 - unit5_finish_rate/unit1_attend_rate,
+    grade_low_rate = mean(package_grade == "LOW", na.rm = TRUE),
+    grade_8_rate = mean(pay_grade == 8, na.rm = TRUE),
+    referral_rate = mean(l1_order_channel == "转介绍", na.rm = TRUE)
+    ) %>% 
+  mutate(
+    across(ends_with("rate"), ~ round(.x *100, 1)),
+    across(ends_with("time"), ~ format(.x, "%Y-%m-%d"))
+    ) %>% 
+  arrange(desc(term_label), desc(l1_pay_time), desc(user_class_start_time))
+```
+
+```{r}
+names_dt <- names(by_date_pay_join)
+DT::datatable(
+  by_date_pay_join,
+    class = "display compact",
+    #filter = "top",
+    colnames = headers[names_dt,],
+    rownames = FALSE,
+    options = list(
+      pageLength = 20
+    )) %>% 
+    formatRound(grepl("rate|prop", names_dt), 2) %>% 
+    formatStyle(grep("rate|prop", names_dt), fontStyle = "italic") 
+```
+
+<!-- 预测 {data-icon="fa-signal"} -->
+<!-- =====================================  -->
+
+<!-- ```{r} -->
+<!-- res <- readRDS(file = "/Users/hetao/Documents/hetao/data/dat_model_res_20210523.rds") -->
+<!-- ``` -->
+
+<!-- Row {data-height=500} -->
+<!-- ------------------------------------- -->
+
+<!-- ```{r} -->
+<!-- highchart() %>% -->
+<!--   hc_add_series(res, "line", hcaes(x = term_label, y = pred_apply_rate), name = "预测续报率") %>% -->
+<!--   hc_add_series(res, "line", hcaes(x = term_label, y = apply_rate), name = "实际续报率") %>% -->
+<!--   hc_xAxis(title = "", type = "category", categories = res$term_label,  -->
+<!--            labels = list(align = "right", rotation =  -45, overflow = none,  -->
+<!--                          style = list(textAlign = "right")) ) %>%  -->
+<!--   hc_yAxis(text = "续报率") %>%  -->
+<!--   hc_legend(verticalAlign = "top") %>%  -->
+<!--   hc_plotOptions( -->
+<!--           series = list( -->
+<!--             dataLabels = list(enabled = TRUE) -->
+<!--           )) -->
+<!-- ``` -->
+
 
 

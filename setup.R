@@ -12,11 +12,9 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warnings = FALSE)
 #knitr::opts_chunk$set(fig.width = 13, fig.height = 7, fig.align = "center")
 
   ########## read data ############
+dat <- readRDS(paste0("~/Documents/hetao/data/dat_dash_oops.rds"))
 root_dir <- "~/Documents/hetao/data/"
-dat <- readRDS(paste0(root_dir, "dat_dash_oops.rds"))
-headers <- readRDS(paste0(root_dir, "headers.rds"))
-#furion <- readRDS("/Users/hetao/Documents/hetao/data/furion.rds")
-dat_ct_term <- readRDS(paste0(root_dir, "dat_ct_term.rds"))
+headers <- readRDS("~/Documents/hetao/data/headers.rds")
 rm(root_dir)
 
   ########## ggplot theme ############
@@ -27,5 +25,12 @@ theme_set(
           legend.text = element_text(size = 10),
           legend.position = "bottom")
 )
+  ########## color list ############
 
-source("helper.R")
+color = list(
+  "channel" = c("black","#53b400","#00b6eb","lightgrey","#c9a215","#a58aff","#ee6bda"),
+  "group_city" = c("#00b6eb","#53b400","#c9a215","#a58aff","#ee6bda","lightgrey")
+)
+
+
+source("~/Documents/hetao/oop-dash/helper.R")
