@@ -33,39 +33,25 @@ showDT <- function(data, pageLength = 20, dom = 'Blfrtip',
   #             backgroundPosition = 'center')
 }
 
-# plot_comp <- function(data, x, y, group, grid) {
-#   gg =  data %>%
-#     mutate(label = factor(ifelse(term_name == "2021春季-第16期", pay_grade, NA))) %>% 
-#     ggplot(aes_string(x = x, y = y)) +
-#     geom_line(aes_string(group = group, color = group)) +
-#     geom_text(aes(label = label, color = label),
-#               hjust = 0, nudge_x = 0.1) +
-#     labs( x = "", y = "") +
-#     theme(legend.position = 'none') 
-#   
-#   if (!missing(grid)) gg = gg + facet_grid(vars(package_grade))
-#   
-#   ggplotly(gg)
-#   }
-
 getRates <- function(grp_data, .vars, ...) {
   grp_data %>% 
     summarise(
       enroll_total = n_distinct(user_id, na.rm = TRUE),
-      apply_total = n_distinct(ifelse(!is.na(renewal_pay_time) & 
-                                      renewal_order_course_type == "ANNUAL",
+      ## 年课
+      # apply_total = n_distinct(ifelse(!is.na(renewal_pay_time) & 
+      #                                 renewal_order_course_type == "ANNUAL",
+      #                                 user_id, NA), na.rm = TRUE),
+      # 年课+季课
+      apply_total = n_distinct(ifelse(!is.na(renewal_pay_time),
                                       user_id, NA), na.rm = TRUE),
       apply_rate = apply_total/enroll_total,
-      apply_2_rate = n_distinct(ifelse(!is.na(renewal_pay_time), user_id, NA), 
-                                na.rm = TRUE)/enroll_total,
       ct_total = n_distinct(counselor_id, na.rm = TRUE),
       ct_enroll_total = round(enroll_total/ct_total),
-      add_wx_rate = mean(ifelse(is.na(add_wx_time), 0, 1)),
-      subscribe_rate = mean(is_subscribe, na.rm = TRUE),
+      add_wx_rate = n_distinct(ifelse(!is.na(add_wx_time), user_id, NA), 
+                               na.rm = TRUE)/enroll_total,
+      subscribe_rate = n_distinct(ifelse(is_subscribe == 1, user_id, NA), 
+                                  na.rm = TRUE)/enroll_total,
       unit0_attend_rate = n_distinct(ifelse(is.na(unit0_attend_time), NA, user_id), na.rm = TRUE)/enroll_total,
-      unit0_finish_rate = n_distinct(ifelse(is.na(unit0_finish_time), NA, user_id), na.rm = TRUE)/enroll_total,
-      #.unit1_attend_dayn = difftime(min(unit1_attend_time, na.rm = TRUE), unit1_attend_time, units = "days"),
-      #unit1_d1_attend_rate = n_distinct(ifelse((!is.na(unit1_attend_time)) & (.unit1_attend_dayn == 0), user_id, NA), na.rm = TRUE)/enroll_total,
       unit1_attend_rate = n_distinct(ifelse(is.na(unit1_attend_time), NA, user_id), na.rm = TRUE)/enroll_total,
       unit5_finish_rate = n_distinct(ifelse(is.na(unit5_finish_time), NA, user_id), na.rm = TRUE)/enroll_total,
       retent_rate = unit5_finish_rate/unit1_attend_rate,
@@ -75,7 +61,7 @@ getRates <- function(grp_data, .vars, ...) {
     mutate(
       across(ends_with("rate"), ~ round(.x *100, 1)),
       enroll_rate = round(enroll_total/sum(enroll_total)*100),
-      across(ends_with("rate"), ~ ifelse(.x < 1, NA, .x))
+      across(ends_with("rate"), ~ ifelse(.x < 0.1, NA, .x))
     ) %>% 
     select(-starts_with("."))
 }
